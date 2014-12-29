@@ -101,15 +101,24 @@ class Test_LibBookmarks_Bookmarks extends PHPUnit_Framework_TestCase {
 		$returnAmazonDe = file_get_contents(__DIR__ . '/res/amazonHtml.file');
 		$returnGolemDe = file_get_contents(__DIR__ . '/res/golemHtml.file');
 		$httpHelperMock->expects($this->any())->method('getUrlContent')->with($this->anything())->will($this->onConsecutiveCalls($returnAmazonDe, $returnGolemDe));
+		$httpHelperMock->expects($this->any())->method('getFinalLocationOfURL')->with($this->anything())->willReturn("finalDummyUrl");
+		$httpHelperMock->expects($this->any())->method('getHeaders')->with($this->anything())->willReturn(array('Content-Type' => 'text/html'));
 		$this->registerHttpHelper($httpHelperMock);
 
-		$metadataAmazon = Bookmarks::getURLMetadata('amazonHtml');
-		$this->assertTrue($metadataAmazon['url'] == 'amazonHtml');
+		$metadataAmazon = Bookmarks::getURLMetadata('http://www.amazonHtml.de');
+		$this->assertTrue($metadataAmazon['url'] == 'http://www.amazonHtml.de');
 		$this->assertTrue(strpos($metadataAmazon['title'], 'ü') !== false);
 
-		$metadataGolem = Bookmarks::getURLMetadata('golemHtml');
-		$this->assertTrue($metadataGolem['url'] == 'golemHtml');
+		$metadataGolem = Bookmarks::getURLMetadata('http://www.golemHtml.de');
+		$this->assertTrue($metadataGolem['url'] == 'http://www.golemHtml.de');
 		$this->assertTrue(strpos($metadataGolem['title'], 'f&uuml;r') == false);
+	}
+	
+	function testSanitizeUrl(){
+		$this->assertEquals('http://www.heise.de', Bookmarks::sanitizeURL('http://www.heise.de'));
+		$this->assertEquals('http://www.heise.de', Bookmarks::sanitizeURL('www.heise.de'));
+		$this->assertEquals(null, Bookmarks::sanitizeURL('http://'));
+		$this->assertEquals(null, Bookmarks::sanitizeURL('mamamia'));
 	}
 
 	protected function tearDown() {

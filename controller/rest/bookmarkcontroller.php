@@ -68,20 +68,24 @@ class BookmarkController extends ApiController {
 	 */
 	public function newBookmark($url = "", $item = array(), $from_own = 0, $title = "", $is_public = false, $description = "") {
 
-		// Check if it is a valid URL
-		if (filter_var($url, FILTER_VALIDATE_URL) === FALSE) {
-			return new JSONResponse(array('status' => 'error'), Http::STATUS_BAD_REQUEST);
+		$sanitizedUrl = Bookmarks::sanitizeURL($url);
+		if ($sanitizedUrl == null) {
+			return new JSONResponse(array('status' => 'error'), Http::STATUS_NOT_ACCEPTABLE);
+		}
+		
+		if (Bookmarks::bookmarkExists($sanitizedUrl, $this->userId, $this->db) !== false){
+			return new JSONResponse(array('status' => 'error'), Http::STATUS_ALREADY_REPORTED);
 		}
 
 		$tags = isset($item['tags']) ? $item['tags'] : array();
 
 		if ($from_own == 0) {
-			$datas = Bookmarks::getURLMetadata($url);
-			if (isset($datas['title'])) {
-				$title = $datas['title'];
+			$metaData = Bookmarks::getURLMetadata($sanitizedUrl);
+			if (isset($metaData['title'])) {
+				$title = $metaData['title'];
 			}
 		}
-		$id = Bookmarks::addBookmark($this->userId, $this->db, $url, $title, $tags, $description, $is_public);
+		$id = Bookmarks::addBookmark($this->userId, $this->db, $sanitizedUrl, $title, $tags, $description, $is_public);
 		$bm = Bookmarks::findUniqueBookmark($id, $this->userId, $this->db);
 		return new JSONResponse(array('item' => $bm, 'status' => 'success'));
 	}
@@ -111,19 +115,25 @@ class BookmarkController extends ApiController {
 	 */
 	public function editBookmark($id = null, $url = "", $item = array(), $title = "", $is_public = false, $record_id = null, $description = "") {
 
-		// Check if it is a valid URL
-		if (filter_var($url, FILTER_VALIDATE_URL) === FALSE) {
-			return new JSONResponse(array(), Http::STATUS_BAD_REQUEST);
+		$sanitizedUrl = Bookmarks::sanitizeURL($url);
+		if ($sanitizedUrl == null) {
+			return new JSONResponse(array('status' => 'error'), Http::STATUS_NOT_ACCEPTABLE);
 		}
 
-		if ($record_id == null) {
+		if ($record_id == null && $id == null) {
 			return new JSONResponse(array(), Http::STATUS_BAD_REQUEST);
+		}
+		
+		if ($record_id == null && $id != null) {
+			$record_id = $id;
 		}
 
 		$tags = isset($item['tags']) ? $item['tags'] : array();
 
 		if (is_numeric($record_id)) {
-			$id = Bookmarks::editBookmark($this->userId, $this->db, $record_id, $url, $title, $tags, $description, $is_public = false);
+			$id = Bookmarks::editBookmark($this->userId, $this->db, $record_id, $sanitizedUrl, $title, $tags, $description, $is_public = false);
+		} else {
+			return new JSONResponse(array(), Http::STATUS_BAD_REQUEST);
 		}
 
 		$bm = Bookmarks::findUniqueBookmark($id, $this->userId, $this->db);

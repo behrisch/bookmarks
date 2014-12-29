@@ -423,7 +423,7 @@ class Bookmarks {
 	 * @param string $title Name of the bookmark
 	 * @param array $tags Simple array of tags to qualify the bookmark (different tags are taken from values)
 	 * @param string $description A longer description about the bookmark
-	 * @param boolean $public True if the bookmark is publishable to not registered users
+	 * @param boolean $is_public True if the bookmark is publishable to not registered users
 	 * @return int The id of the bookmark created
 	 */
 	public static function addBookmark($userid, IDb $db, $url, $title, $tags = array(), $description = '', $is_public = false) {
@@ -539,27 +539,125 @@ class Bookmarks {
 	}
 
 	/**
+	 * @brief Check if url is valid or try to create a valid url.
+	 * @param $url Url to check for validity or to fix
+	 * @return string|null A valid Url or null
+	 * */
+	public static function sanitizeURL($url) {
+		if (Bookmarks::validUrl($url)) {
+			return $url;
+		} else {
+			// If url is invalid but includes a protocol we cannot guess how to
+			// create a valid url.
+			preg_match('/^.+:/i', $url, $match);
+			if (isset($match[0])) {
+				return null;
+			} else {
+				// If the input url does not specifiy a protocol we try to prepend
+				// http and check if it is a valid url then.
+				$url = 'http://' . $url;
+				if (Bookmarks::validUrl($url)) {
+					return $url;
+				} else {
+					return null;
+				}
+			}
+		}
+	}
+
+	/**
+	 * @brief Validate if url is a public http(s) or ftp(s) url
+	 * @param $url Url to validate
+	 * @return bool Result of validity check
+	 * */
+	private static function validUrl($url) {
+		// MIT licensed source for regex: https://gist.github.com/dperini/729294
+		// Tests for http(s)/ftp public URLs: https://mathiasbynens.be/demo/url-regex
+		// Slightly adapted to accept ftps as well
+		return preg_match(''
+				. '_^'
+				// protocol identifier
+				. '(?:(?:https?|ftps?)://)'
+				// user:pass authentication
+				. '(?:\S+(?::\S*)?@)?'
+				. '(?:'
+				// IP address exclusion
+				// private & local networks 
+				. '(?!(?:10|127)(?:\.\d{1,3}){3})'
+				. '(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})'
+				. '(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})'
+				// IP address dotted notation octets
+				// excludes loopback network 0.0.0.0
+				// excludes reserved space >= 224.0.0.0
+				// excludes network & broacast addresses
+				// (first & last IP address of each class) 
+				. '(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])'
+				. '(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}'
+				. '(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))'
+				. '|'
+				// host name
+				. '(?:(?:[a-z\x{00a1}-\x{ffff}0-9]-*)*[a-z\x{00a1}-\x{ffff}0-9]+)'
+				// domain name
+				. '(?:\.(?:[a-z\x{00a1}-\x{ffff}0-9]-*)*[a-z\x{00a1}-\x{ffff}0-9]+)*'
+				// TLD identifier
+				. '(?:\.(?:[a-z\x{00a1}-\x{ffff}]{2,}))'
+				. ')'
+				// port number
+				. '(?::\d{2,5})?'
+				// resource path
+				. '(?:/\S*)?'
+				. '$_iuS'
+				, $url);		
+	}
+
+	/**
 	 * @brief Load Url and receive Metadata (Title)
 	 * @param $url Url to load and analyze
 	 * @return array Metadata for url;
 	 * */
 	public static function getURLMetadata($url) {
-		
+
 		$metadata = array();
 		$metadata['url'] = $url;
-		$page = "";
-		
-		try {
-			$page = \OC::$server->getHTTPHelper()->getUrlContent($url);
-		} catch (\Exception $e) {
-			throw $e;
+
+		// Don't try to fetch metadata if url doesn't start with http(s)
+		if (strncmp($url, 'http', strlen('http'))) {
+			$metadata['title'] = $url;
+			return $metadata;
 		}
-		
+
+		$page = "";
+
+		// Get the final destination of a possibly redirected url and fetch headers there.
+		$finalDestination = \OC::$server->getHTTPHelper()->getFinalLocationOfURL($url);
+		$headers = \OC::$server->getHTTPHelper()->getHeaders($finalDestination);
+
+		//Only try to fetch content and parse title if content is supposed to be html
+		if (isset($headers['Content-Type']) && strpos($headers['Content-Type'], 'text/html') !== false) {
+			$title = Bookmarks::fetchHtmlTitle($finalDestination);
+			if ($title != null) {
+				$metadata['title'] = $title;
+				return $metadata;
+			}
+		} else {
+			$metadata['title'] = $url;
+			return $metadata;
+		}
+	}
+
+	/**
+	 * @brief Parses the html title out of a resource behind an url
+	 * @param $url Url of resource to parse
+	 * @return string|null Parsed title or null
+	 * */
+	private static function fetchHtmlTitle($url) {
+		$page = \OC::$server->getHTTPHelper()->getUrlContent($url);
+
 		//Check for encoding of site.
 		//If not UTF-8 convert it.
 		$encoding = array();
 		preg_match('/charset="?(.*?)["|;]/i', $page, $encoding);
-		
+
 		if (isset($encoding[1])) {
 			$decodeFrom = strtoupper($encoding[1]);
 		} else {
@@ -573,13 +671,15 @@ class Bookmarks {
 			}
 
 			preg_match("/<title>(.*)<\/title>/si", $page, $match);
-			
+
 			if (isset($match[1])) {
-				$metadata['title'] = html_entity_decode($match[1]);
+				return html_entity_decode($match[1]);
+			} else {
+				return null;
 			}
+		} else {
+			return null;
 		}
-		
-		return $metadata;
 	}
 
 	/**
